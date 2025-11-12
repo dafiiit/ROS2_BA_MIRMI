@@ -4,7 +4,7 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node # <-- WICHTIG: Schon vorhanden
+from launch_ros.actions import Node
 
 def generate_launch_description():
 
@@ -15,8 +15,7 @@ def generate_launch_description():
     world_path = os.path.join(pkg_my_robot_simulation, 'worlds', 'car_world.sdf')
     bridge_config_path = os.path.join(pkg_my_robot_simulation, 'config', 'bridge.yaml')
 
-    # 1. Umgebungsvariable für Modelle setzen (KORRIGIERT)
-    # (Dein Block von vorher, der funktioniert)
+    # 1. Umgebungsvariable für Modelle setzen
     existing_gz_path = os.environ.get('GZ_SIM_RESOURCE_PATH', '')
     apriltag_models_path = '/home/david/gazebo_apriltag_harmonic/models'
     new_gz_path = f"{models_path}:{apriltag_models_path}:{existing_gz_path}"
@@ -44,41 +43,36 @@ def generate_launch_description():
         output='screen'
     )
     
-    
+    # 4. Camera Info Publisher
     camera_info_node = Node(
-    	package='my_robot_simulation',
-   	executable='fake_camera_info_pub',
-    	name='fake_camera_info_publisher'
-	)
+        package='my_robot_simulation',
+        executable='fake_camera_info_pub',
+        name='fake_camera_info_publisher'
+    )
 
-
-    # ===================================================================
-    # === HIER KOMMT DEIN NEUER KNOTEN (aus dem ros2 run Befehl) ===
-    # ===================================================================
+    # 5. AprilTag Detector Node
     apriltag_node = Node(
         package='apriltag_ros',
         executable='apriltag_node',
         name='apriltag_detector',
         output='screen',
-        # 'ros2 run ... -r' wird zu 'remappings'
         remappings=[
-            ('/image_rect', '/camera/image_raw'),
-            ('/camera_info', '/camera/camera_info')
+            ('image_rect', '/camera/image_raw'),
+            ('camera_info', '/camera/camera_info'),
+            # Explizites Remapping für das annotierte Bild
+            ('tag_detections_image', '/camera/tag_detections_image')
         ],
-        # 'ros2 run ... -p' wird zu 'parameters'
-        # Wichtig: Parameter in Launch-Files sind eine Liste von Dictionaries
         parameters=[{
-            'tag_family': 'tf36h11',
-            'size': 0.20,  # <-- Passe das an, falls die Tag-Größe in der SDF anders ist!
-            'publish_tag_detections_image': True
+            'family': '36h11',
+            'size': 0.20,
+            'max_hamming': 0,
+            # Versuche mehrere mögliche Parameternamen für das annotierte Bild
+            'image_transport': 'raw',
+            'publish_tag_detections_image': True,
         }]
     )
     
-    # ===================================================================
-    # === WICHTIGE ERGÄNZUNG FÜR DEIN ZIEL (Position bestimmen) ===
-    # ===================================================================
-    # Du musst dem System sagen, wo das Tag in der Welt IST.
-    # Annahme: Es ist bei X=2, Y=0, Z=0.5 und 90° um X gedreht (Roll=1.5708)
+    # 6. Static Transform für das AprilTag in der Welt
     static_tag_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -90,16 +84,25 @@ def generate_launch_description():
             '0.0', '1.5708', '0.0',
             # Parent-Frame
             'world',
-            # Child-Frame (Name des Tags)
-            'tag36_11_00000' # <-- Stelle sicher, dass der Name zum Tag passt
+            # Child-Frame (Name des Tags - muss mit der Familie übereinstimmen)
+            'tag36_11_00000'
         ]
+    )
+    
+    # 7. AprilTag Visualizer - Zeichnet Detektionen auf das Bild
+    visualizer_node = Node(
+        package='my_robot_simulation',
+        executable='apriltag_visualizer',
+        name='apriltag_visualizer',
+        output='screen'
     )
 
     return LaunchDescription([
         set_env,
         gz_sim,
         gz_bridge,
+        camera_info_node,
         apriltag_node,    
         static_tag_tf,
-        camera_info_node
+        visualizer_node
     ])
