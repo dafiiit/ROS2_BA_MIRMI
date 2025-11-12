@@ -72,20 +72,68 @@ def generate_launch_description():
         }]
     )
     
-    # 6. Static Transform für das AprilTag in der Welt
-    static_tag_tf = Node(
+    # 6. Static Transforms für alle AprilTags in der Welt
+    static_tag_0_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        name='static_tag_publisher',
+        name='static_tag_0_publisher',
         arguments=[
             # X, Y, Z
-            '2.0', '0.0', '0.5',
+            '3.0', '0.0', '0.5',
             # Yaw, Pitch, Roll (in Radiant!)
             '0.0', '1.5708', '0.0',
             # Parent-Frame
             'world',
-            # Child-Frame (Name des Tags - muss mit der Familie übereinstimmen)
+            # Child-Frame
             'tag36_11_00000'
+        ]
+    )
+    
+    # Tag 1: Hütte Innen Rückwand (ID 1)
+    static_tag_1_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_tag_1_publisher',
+        arguments=[
+            '3.601', '2.0', '0.75',     # X Y Z
+            '0.0', '-1.5708', '0.0',    # Yaw Pitch Roll
+            'world', 'tag36_11_00001'
+        ]
+    )
+    
+    # Tag 2: Hütte Außen Rückwand (ID 2)
+    static_tag_2_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_tag_2_publisher',
+        arguments=[
+            '3.499', '2.0', '0.75',     # X Y Z
+            '0.0', '1.5708', '0.0',     # Yaw Pitch Roll
+            'world', 'tag36_11_00002'
+        ]
+    )
+    
+    # Tag 3: Hütte Außen Linke Wand (ID 3)
+    static_tag_3_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_tag_3_publisher',
+        arguments=[
+            '5.0', '3.101', '0.75',     # X Y Z
+            '0.0', '0.0', '1.5708',     # Yaw Pitch Roll
+            'world', 'tag36_11_00003'
+        ]
+    )
+    
+    # Tag 4: Hütte Außen Rechte Wand (ID 4)
+    static_tag_4_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_tag_4_publisher',
+        arguments=[
+            '5.0', '0.899', '0.75',     # X Y Z
+            '0.0', '0.0', '-1.5708',    # Yaw Pitch Roll
+            'world', 'tag36_11_00004'
         ]
     )
     
@@ -102,7 +150,13 @@ def generate_launch_description():
         gz_sim,
         gz_bridge,
         camera_info_node,
-        apriltag_node,    
-        static_tag_tf,
+        apriltag_node,
+        
+        static_tag_0_tf,
+        static_tag_1_tf,
+        static_tag_2_tf,
+        static_tag_3_tf,
+        static_tag_4_tf,
+        
         visualizer_node
     ])

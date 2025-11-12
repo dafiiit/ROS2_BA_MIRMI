@@ -24,6 +24,9 @@ setup(
         # Modell-Dateien installieren (rekursiv)
         (os.path.join('share', package_name, 'models', 'vehicle_blue'), 
             glob(os.path.join('models', 'vehicle_blue', '*'))),
+        # Hütte-Modell installieren
+        (os.path.join('share', package_name, 'models', 'april_hut'), 
+            glob(os.path.join('models', 'april_hut', '*'))),
         
     ],
     install_requires=['setuptools'],
