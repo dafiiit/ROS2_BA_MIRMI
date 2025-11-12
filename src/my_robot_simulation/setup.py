@@ -38,9 +38,9 @@ setup(
         ],
     },
     entry_points={
-    #'console_scripts': [
-    #    'fake_camera_info_pub = my_robot_simulation.fake_camera_info_pub:main',
-    #],
+    'console_scripts': [
+        'fake_camera_info_pub = my_robot_simulation.fake_camera_info_pub:main',
+    ],
 },
 
 )
