@@ -45,11 +45,11 @@ def generate_launch_description():
     )
     
     
-    camera_info_node = Node(
-    	package='my_robot_simulation',
-    	executable='fake_camera_info_pub',
-    	name='fake_camera_info_publisher'
-	)
+    #camera_info_node = Node(
+    #	package='my_robot_simulation',
+    #	executable='fake_camera_info_pub',
+    #	name='fake_camera_info_publisher'
+#	)
 
 
     # ===================================================================
@@ -100,6 +100,5 @@ def generate_launch_description():
         gz_sim,
         gz_bridge,
         apriltag_node,    
-        static_tag_tf,     
-        camera_info_node
+        static_tag_tf
     ])
