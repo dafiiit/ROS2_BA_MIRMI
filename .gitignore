@@ -1,0 +1,16 @@
+# Ignoriere die von colcon erzeugten Ordner
+build/
+install/
+log/
+
+# Ignoriere Python Cache
+__pycache__/
+*.pyc
+
+# Ignoriere temporäre Dateien
+*~
+*.swp
+*.swo
+
+# Optional: Für VS Code
+.vscode/
