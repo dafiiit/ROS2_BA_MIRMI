@@ -12,7 +12,7 @@ def generate_launch_description():
     pkg_ros_gz_sim = get_package_share_directory('ros_gz_sim')
 
     models_path = os.path.join(pkg_mirmi_docking_sim, 'models')
-    world_path = os.path.join(pkg_mirmi_docking_sim, 'worlds', 'world.sdf')
+    world_path = os.path.join(pkg_mirmi_docking_sim, 'worlds', 'docking_world.sdf')
     bridge_config_path = os.path.join(pkg_mirmi_docking_sim, 'config', 'bridge.yaml')
 
     # 1. Umgebungsvariable für Modelle setzen
@@ -47,7 +47,7 @@ def generate_launch_description():
     camera_info_node = Node(
         package='mirmi_docking_sim',
         executable='camera_info_sync',
-        name='fake_camera_info_publisher'
+        name='camera_info_sync_node'
     )
 
     # 5. AprilTag Detector Node
