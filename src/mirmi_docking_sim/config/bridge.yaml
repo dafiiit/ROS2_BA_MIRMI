@@ -19,20 +19,29 @@
   gz_type_name: "gz.msgs.Model"
   direction: GZ_TO_ROS
 
-# NEUE EINTRÄGE FÜR DIE KAMERA
+# 4. RGB-Kamera (für AprilTags)
 - ros_topic_name: "/camera/image_raw"
   gz_topic_name: "/model/robot/camera"
   ros_type_name: "sensor_msgs/msg/Image"
   gz_type_name: "gz.msgs.Image"
   direction: GZ_TO_ROS
 
-#- ros_topic_name: "/camera/camera_info"
-#  gz_topic_name: "/model/robot/camera/camera_info"
-#  ros_type_name: "sensor_msgs/msg/CameraInfo"
-#  gz_type_name: "gz.msgs.CameraInfo"
-#  direction: GZ_TO_ROS
-  
-  # 6. Robot Pose (Gazebo -> ROS)
+# 5. Tiefen-Kamera (für Nav2 / LaserScan)
+# Das Tiefenbild selbst
+- ros_topic_name: "/depth/image_raw"
+  gz_topic_name: "/model/robot/depth_camera/depth"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+# Die Kamera-Infos für das Tiefenbild
+- ros_topic_name: "/depth/camera_info"
+  gz_topic_name: "/model/robot/depth_camera/depth/camera_info"
+  ros_type_name: "sensor_msgs/msg/CameraInfo"
+  gz_type_name: "gz.msgs.CameraInfo"
+  direction: GZ_TO_ROS
+
+# 6. Robot Pose (Optional, aber nützlich für Debugging)
 - ros_topic_name: "/model/robot/pose"
   gz_topic_name: "/model/robot/pose"
   ros_type_name: "geometry_msgs/msg/PoseArray"

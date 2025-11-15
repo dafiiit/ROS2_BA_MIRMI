@@ -14,6 +14,7 @@
   <depend>sensor_msgs</depend>
   <depend>apriltag_msgs</depend>
   <depend>tf_transformations</depend>
+  <depend>depthimage_to_laserscan</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

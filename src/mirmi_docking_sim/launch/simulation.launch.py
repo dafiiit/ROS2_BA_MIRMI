@@ -74,6 +74,25 @@ def generate_launch_description():
             'z_up': False,
         }]
     )
+    
+    # 6. Depth Camera Node
+    depth_to_scan_node = Node(
+	    package='depthimage_to_laserscan',
+	    executable='depthimage_to_laserscan_node',
+	    name='depth_to_scan_node',
+	    remappings=[
+		# Nutzt die neuen Topics aus der bridge.yaml
+		('image', '/depth/image_raw'),
+		('camera_info', '/depth/camera_info'),
+		('scan', '/scan') # Nav2 erwartet standardmäßig /scan
+	    ],
+	    parameters=[{
+		'range_min': 0.1,
+		'range_max': 100.0,
+		'scan_height': 10, # Nimmt 10 Pixelzeilen aus der Bildmitte
+		'output_frame': 'robot/chassis/camera_sensor' # Selber Frame wie die Kameras
+	    }]
+    )
         
     # Tag 1: Hütte Innen Rückwand (ID 1)
     static_tag_1_tf = Node(
@@ -189,6 +208,8 @@ def generate_launch_description():
         gz_bridge,
         camera_info_node,
         apriltag_node,
+        
+        depth_to_scan_node,
  
         odom_tf_node, 
         static_camera_tf,
