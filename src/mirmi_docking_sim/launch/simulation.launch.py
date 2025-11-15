@@ -173,6 +173,13 @@ def generate_launch_description():
         name='docking_controller',
         output='screen'
     )
+    
+    odom_tf_node = Node(
+    	package='mirmi_docking_sim',
+    	executable='odom_to_tf',
+    	name='odom_to_tf_publisher',
+    	output='screen'
+	)
 
     return LaunchDescription([
         set_env,
@@ -180,6 +187,8 @@ def generate_launch_description():
         gz_bridge,
         camera_info_node,
         apriltag_node,
+ 
+        odom_tf_node, 
         
         static_tag_0_tf,
         static_tag_1_tf,

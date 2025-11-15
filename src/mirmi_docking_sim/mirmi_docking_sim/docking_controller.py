@@ -9,7 +9,7 @@ from geometry_msgs.msg import Twist, TransformStamped, Pose, Transform
 from apriltag_msgs.msg import AprilTagDetectionArray
 import tf2_ros
 from tf2_ros import TransformException
-from tf_transformations import euler_from_quaternion, quaternion_from_euler, euler_matrix, translation_matrix, quaternion_matrix, inverse_matrix
+from tf_transformations import euler_from_quaternion, quaternion_from_euler, euler_matrix, translation_matrix, quaternion_matrix, inverse_matrix, quaternion_from_matrix
 
 def transform_to_matrix(transform: Transform):
     trans = [transform.translation.x, transform.translation.y, transform.translation.z]
@@ -113,9 +113,13 @@ class DockingController(Node):
             tag_id = detection.id
             tag_frame = f"tag36_11_{tag_id:05d}"
             
-            # --- NEU: Definiere ein Timeout ---
+            # Definiere ein Timeout ---
             timeout_duration = rclpy.time.Duration(seconds=0.5)
             now = rclpy.time.Time()
+            
+            # In run_localization(), vor den TF-Lookups:
+            self.get_logger().info("Verfügbare Frames:")
+            self.get_logger().info(str(self.tf_buffer.all_frames_as_string()))
             
             # 1. Hole T(world, tag)
             tf_world_tag = self.tf_buffer.lookup_transform(
@@ -131,7 +135,7 @@ class DockingController(Node):
                 'robot/chassis/camera_sensor', # Parent Frame
                 tag_frame,                     # Child Frame
                 now,  # <--- GEÄNDERT
-                timeout=timeout_duration # <--- NEU
+                timeout=timeout_duration 
             )
             T_cam_tag = transform_to_matrix(tf_cam_tag.transform)
             
@@ -157,7 +161,8 @@ class DockingController(Node):
             # Extrahiere (x, y, theta)
             x = T_world_chassis[0, 3]
             y = T_world_chassis[1, 3]
-            quat = tf_transformations.quaternion_from_matrix(T_world_chassis)
+            quat = quaternion_from_matrix(T_world_chassis)
+
             _, _, theta = euler_from_quaternion(quat)
             
             self.robot_world_pose = (x, y, theta)
