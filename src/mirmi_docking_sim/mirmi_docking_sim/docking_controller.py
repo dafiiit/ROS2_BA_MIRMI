@@ -21,8 +21,8 @@ class DockingState(Enum):
     GOTO_RADIUS_POINT = 3  # 3. Fährt ZU einem Punkt auf dem 10m-Radius
     FOLLOW_ARC = 4         # 5. Fährt auf dem 10m-Radius bis zur Öffnung
     ALIGN_TO_HUT = 5       # 6. Dreht sich zur Öffnung
-    FINAL_ALIGNMENT = 6    # 7. Steht still, dreht sich exakt auf Tag 1
-    DOCKING = 7            # 7. Fährt in die Hütte
+    FINAL_ALIGNMENT = 6    # 7. Steht still, dreht sich (PIXEL-BASIERT) auf Tag 1
+    DOCKING = 7            # 7. Fährt 10cm, prüft Distanz, geht zu 6
     FINAL_STOP = 8         # 8. Ziel erreicht
 
 
@@ -36,33 +36,41 @@ class DockingController(Node):
         
         # Konstanten für die Navigation
         self.HUT_CENTER = np.array([5.0, 2.0])
-        self.TARGET_RADIUS = 5.5      # Dein Wunsch: 10 Meter
-        self.RADIUS_TOLERANCE = 0.15    # Dein Wunsch: +-10cm
-        self.ARC_SPEED = 0.4           # Geschwindigkeit beim Fahren des Bogens (m/s) (wird nicht mehr genutzt)
-        self.K_P_RADIUS = 0.7          # Verstärkung für Radius-Korrektur (wird nicht mehr genutzt)
+        self.TARGET_RADIUS = 5.5
+        self.RADIUS_TOLERANCE = 0.15
         
         # Wegpunkte (relativ zur Welt)
         self.WAYPOINT_OPENING = np.array([6.5, 2.0])  # Vor der Öffnung (für Ausrichtung)
         self.WAYPOINT_INSIDE = np.array([5.5, 2.0])   # In der Hütte (Endziel)
         
         # Ziel-Tag für die Endausrichtung
-        self.DOCKING_TARGET_FRAME = 'tag36_11_00001' # Das Tag INNEN an der Rückwand
-        self.DOCKING_TARGET_DISTANCE = 1.9 # Ziel-Abstand zum Tag (Robot-Origin bei 5.5, Tag bei 3.6 -> 1.9m)
-        self.DOCKING_SPEED_LINEAR = 0.3    # Langsame, präzise Fahrt
-        self.DOCKING_SPEED_ANGULAR = 1.5   # Maximale Dreh-Korrektur
+        self.DOCKING_TARGET_FRAME = 'tag36_11_00001' # TF-Frame (für Distanz)
+        self.DOCKING_TARGET_ID = 1                   # Tag ID (für Pixel-Mitte)
+        self.DOCKING_TARGET_DISTANCE = 1.9           # Ziel-Abstand (physisch)
+        self.DOCKING_SPEED_ANGULAR = 1.0             # Maximale Dreh-Korrektur
+        
+        # KORREKTUR: Parameter für Pixel-basierte Ausrichtung
+        self.IMAGE_WIDTH = 640.0                 # Gemäß camera_info.yaml
+        self.IMAGE_CENTER_X = self.IMAGE_WIDTH / 2.0 # 320.0
+        self.PIXEL_TOLERANCE = 10.0              # 10 Pixel Toleranz (horizontal)
+        self.K_P_PIXEL = 0.005                   # P-Regler für Pixel-Fehler (Tuning nötig!)
+        
+        # Parameter für 10cm-Fahrmanöver
+        self.NUDGE_SPEED = 0.1  # 0.1 m/s
+        self.NUDGE_DURATION = 1.0 # 1.0s * 0.1m/s = 0.1m = 10cm
         
         # Aktuelle Roboter-Pose (x, y, theta) aus Odometrie
         self.current_odom_pose = None
         
         # Flag ob wir bereits lokalisiert haben
         self.has_localized = False
-        self.localization_count = 0
-        self.last_detection_time = None
-        self.detection_count = 0
+        
+        # KORREKTUR: Speichert die letzte Detektion von Tag 1
+        self.last_target_detection = None
+        self.last_detection_time = self.get_clock().now()
         
         # Variablen für die Kreis-Logik
-        self.arc_direction = 1.0  # 1.0 für CCW (gegen UZS), -1.0 für CW (im UZS)
-        self.tangent_goal_angle = 0.0
+        self.arc_direction = 1.0
         self.current_arc_goal = None
         
         # TF
@@ -86,11 +94,10 @@ class DockingController(Node):
         # Publisher & Subscriber
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         
-        #Publisher für den Robot state
         self.state_pub = self.create_publisher(
             String,
             '/docking_controller/state',
-            state_qos_profile  # Nutzt das latching Profil
+            state_qos_profile
         )
         
         self.detection_sub = self.create_subscription(
@@ -116,12 +123,17 @@ class DockingController(Node):
         # Ziel für simple_go_to
         self.current_goal = None
         
+        # Flags für die 10cm-Fahrmanöver
+        self._align_nudge_active = False
+        self._align_nudge_start_time = None
+        self._docking_drive_active = False
+        self._docking_drive_start_time = None
+        
         self.get_logger().info("=" * 60)
-        self.get_logger().info("DOCKING CONTROLLER (8-PUNKTE-PLAN) GESTARTET")
+        self.get_logger().info("DOCKING CONTROLLER (PIXEL-ALIGN) GESTARTET")
         self.get_logger().info("=" * 60)
         self.get_logger().info(f"Initial State: {self.state.name}")
-        self.get_logger().info(f"Ziel-Radius: {self.TARGET_RADIUS}m")
-        self.get_logger().info("Warte auf Odometrie und AprilTag-Detektionen...")
+        self.get_logger().info(f"Bildmitte X: {self.IMAGE_CENTER_X}px, Toleranz: {self.PIXEL_TOLERANCE}px")
         
         initial_state_msg = String()
         initial_state_msg.data = self.state.name
@@ -133,8 +145,12 @@ class DockingController(Node):
         self.state = new_state
         self.state_entry_time = self.get_clock().now()
         
+        # Setze alle Manöver-Flags bei jedem State-Wechsel zurück
+        self._align_nudge_active = False
+        self._docking_drive_active = False
+        
         state_msg = String()
-        state_msg.data = self.state.name  # z.B. "SEARCHING"
+        state_msg.data = self.state.name
         self.state_pub.publish(state_msg)
         
         self.get_logger().info("=" * 60)
@@ -151,31 +167,35 @@ class DockingController(Node):
             "=" * 60,
         ]
         
-        # Odometrie-Status
         if self.current_odom_pose is not None:
             x, y, theta = self.current_odom_pose
             status_lines.append(f"Odometrie: x={x:.2f}, y={y:.2f}, theta={math.degrees(theta):.1f}°")
         else:
             status_lines.append("Odometrie: KEINE DATEN ❌")
         
-        # Lokalisierungs-Status
         status_lines.append(f"Lokalisierung: {'ERFOLGT ✓' if self.has_localized else 'AUSSTEHEND'}")
         
         # Zustandsspezifische Infos
-        if self.state == DockingState.SEARCHING:
-            status_lines.append("Aktion: Rotiere, suche AprilTags...")
-        elif self.state == DockingState.GOTO_RADIUS_POINT and self.current_odom_pose:
-            current_pos = np.array(self.current_odom_pose[:2])
-            dist = np.linalg.norm(self.HUT_CENTER - current_pos)
-            status_lines.append(f"Aktion: Fahre auf {self.TARGET_RADIUS}m Radius (aktuell: {dist:.2f}m)")
-        elif self.state == DockingState.FOLLOW_ARC and self.current_odom_pose:
-            current_pos = np.array(self.current_odom_pose[:2])
-            dist = np.linalg.norm(self.HUT_CENTER - current_pos)
-            status_lines.append(f"Aktion: Folge Kreis (Dist: {dist:.2f}m, Soll: {self.TARGET_RADIUS}m, Dir: {'CCW' if self.arc_direction > 0 else 'CW'})")
-        elif self.state == DockingState.ALIGN_TO_HUT:
-            status_lines.append("Aktion: Richte zur Hütte aus...")
+        if self.state == DockingState.FINAL_ALIGNMENT:
+            status_lines.append(f"Aktion: Richte auf Pixel-Mitte ({self.IMAGE_CENTER_X}px)...")
+            if self._align_nudge_active:
+                status_lines.append("WARNUNG: Tag verloren, fahre 10cm Nudge!")
+            
+            detection_age_sec = (self.get_clock().now() - self.last_detection_time).nanoseconds / 1e9
+            if self.last_target_detection and detection_age_sec < 1.0:
+                pixel_error = self.IMAGE_CENTER_X - self.last_target_detection.centre.x
+                status_lines.append(f"Tag {self.DOCKING_TARGET_ID} sichtbar: Pixel X={self.last_target_detection.centre.x:.1f}, Fehler={pixel_error:.1f}px")
+            else:
+                status_lines.append(f"Tag {self.DOCKING_TARGET_ID} NICHT SICHTBAR.")
+                
         elif self.state == DockingState.DOCKING:
-            status_lines.append("Aktion: Docke ein...")
+            status_lines.append("Aktion: Prüfe Distanz / Fahre 10cm Schritt...")
+            if self._docking_drive_active:
+                status_lines.append("INFO: Führe 10cm Fahrt aus.")
+        elif self.state == DockingState.FINAL_STOP:
+            status_lines.append("Aktion: Ziel erreicht. Stopp.")
+        else:
+             status_lines.append(f"Aktion: {self.state.name}...")
 
         
         status_lines.append("=" * 60)
@@ -187,11 +207,7 @@ class DockingController(Node):
         """Speichert die aktuelle Odometrie-Pose"""
         pos = msg.pose.pose.position
         orient = msg.pose.pose.orientation
-        
-        # Quaternion zu Euler
-        _, _, yaw = euler_from_quaternion([
-            orient.x, orient.y, orient.z, orient.w
-        ])
+        _, _, yaw = euler_from_quaternion([orient.x, orient.y, orient.z, orient.w])
         
         was_none = self.current_odom_pose is None
         self.current_odom_pose = (pos.x, pos.y, yaw)
@@ -200,56 +216,50 @@ class DockingController(Node):
             self.get_logger().info(f"✓ Erste Odometrie empfangen: ({pos.x:.2f}, {pos.y:.2f})")
 
     def detection_callback(self, msg: AprilTagDetectionArray):
-        """Wird aufgerufen, wenn AprilTags erkannt werden"""
-        self.last_detection_time = self.get_clock().now()
-        self.detection_count += 1
+        """Speichert die letzte Detektion des ZIEL-Tags"""
         
+        # (Logik für SEARCHING/LOCALIZING)
         num_detections = len(msg.detections)
-        
-        # State-spezifische Reaktionen
         if self.state == DockingState.SEARCHING and num_detections > 0:
             tag_ids = [d.id for d in msg.detections]
             self.get_logger().info(f"✓ Tag(s) {tag_ids} gefunden während SEARCHING")
             self.publish_twist(0.0, 0.0)
             self.change_state(DockingState.LOCALIZING)
             
-        # Versuche Lokalisierung während SEARCHING und LOCALIZING
         if self.state in [DockingState.SEARCHING, DockingState.LOCALIZING]:
             if num_detections > 0:
                 self.run_localization(msg)
+        
+        # KORREKTUR: Suche und speichere immer die Detektion von Tag 1
+        found_target = False
+        if num_detections > 0:
+            for detection in msg.detections:
+                if detection.id == self.DOCKING_TARGET_ID:
+                    self.last_target_detection = detection
+                    self.last_detection_time = self.get_clock().now()
+                    found_target = True
+                    break # Wir haben unser Ziel-Tag
+        
+        if not found_target:
+            # Setze es nicht auf None, damit der control_loop das Alter
+            # der letzten Detektion prüfen kann
+            pass
 
     def run_localization(self, msg: AprilTagDetectionArray):
-        """Versucht, die Roboter-Welt-Pose zu berechnen (Stark vereinfacht)"""
-        
-        # Diese Funktion sollte eine robuste Pose liefern.
-        # Hier simulieren wir, dass es funktioniert, sobald Odometrie da ist.
+        """Simuliert die erste Lokalisierung"""
         if self.current_odom_pose is None:
             return
             
-        try:
-            # (Hier käme die komplexe TF-Logik hin)
-            # ...
-            # Wir nehmen für dieses Beispiel an, dass die Odometrie
-            # nach der ersten Sichtung "gut genug" ist.
-            self.localization_count += 1
+        if not self.has_localized:
+            self.has_localized = True
+            self.get_logger().info("✓✓✓ ERSTE ERFOLGREICHE LOKALISIERUNG! ✓✓✓")
+            self.change_state(DockingState.GOTO_RADIUS_POINT)
             
-            if not self.has_localized:
-                self.has_localized = True
-                self.get_logger().info("✓✓✓ ERSTE ERFOLGREICHE LOKALISIERUNG! ✓✓✓")
-                # Gehe zum nächsten Schritt
-                self.change_state(DockingState.GOTO_RADIUS_POINT)
-                
-        except Exception as e:
-            self.get_logger().error(f"❌ Lokalisierung fehlgeschlagen: {e}")
-            
-    # HINWEIS: run_localization_tf wurde der Einfachheit halber entfernt.
-    # Die Logik in run_localization sollte bei Bedarf TF nutzen.
 
     def control_loop(self):
         """Haupt-Steuerungslogik"""
         
         if self.current_odom_pose is None:
-            # Warten auf Odometrie
             if self.state.value > DockingState.LOCALIZING.value:
                 self.get_logger().warn("Warte auf Odometrie...", throttle_duration_sec=30.0)
             return
@@ -259,52 +269,29 @@ class DockingController(Node):
         
         # --- 1. Suchen ---
         if self.state == DockingState.SEARCHING:
-            self.publish_twist(0.0, 0.3)  # Langsam drehen
+            self.publish_twist(0.0, 0.3)
             return
         
         # --- 2. Lokalisieren ---
         if self.state == DockingState.LOCALIZING:
-            # Warten, bis run_localization() den Status auf has_localized setzt
-            # und den Status auf GOTO_RADIUS_POINT ändert.
-            # Drehe weiter, um bessere Sicht zu bekommen.
             self.publish_twist(0.0, 0.2)
             return
         
         # --- 3. Auf 10m Abstand fahren ---
         if self.state == DockingState.GOTO_RADIUS_POINT:
+            # (Diese Logik bleibt unverändert)
             vec_to_center = self.HUT_CENTER - current_pos_vec
             dist_to_center = np.linalg.norm(vec_to_center)
             
             if dist_to_center > 0.01:
-                # Berechne Zielpunkt auf 10m Radius
                 target_point = self.HUT_CENTER - (vec_to_center / dist_to_center) * self.TARGET_RADIUS
-                
                 if self.simple_go_to(target_point, tolerance=self.RADIUS_TOLERANCE):
-                    self.get_logger().info(f"✓ {self.TARGET_RADIUS}m Radius erreicht. Berechne kürzeste Kreisbahn...")
-                    
-                    # 1. Winkel des Ziels (Öffnung)
-                    opening_angle = math.atan2(
-                        self.WAYPOINT_OPENING[1] - self.HUT_CENTER[1],
-                        self.WAYPOINT_OPENING[0] - self.HUT_CENTER[0]
-                    )
-                    # 2. Aktueller Winkel des Roboters
-                    current_angle_on_circle = math.atan2(
-                        current_pos_vec[1] - self.HUT_CENTER[1],
-                        current_pos_vec[0] - self.HUT_CENTER[0]
-                    )
-                    # 3. Differenzwinkel (kürzester Weg)
-                    angle_diff_to_opening = opening_angle - current_angle_on_circle
-                    angle_diff_to_opening = (angle_diff_to_opening + math.pi) % (2 * math.pi) - math.pi
-                    
-                    # 4. Drehrichtung setzen
-                    if angle_diff_to_opening > 0:
-                        self.arc_direction = 1.0  # CCW
-                    else:
-                        self.arc_direction = -1.0 # CW
-                    
-                    self.get_logger().info(f"✓ Kürzeste Richtung: {'CCW' if self.arc_direction > 0 else 'CW'}. Starte Kreisbahn (Schritt 4).")
-                    
-                    # 5. DIREKT ZU STATE 4 (FOLLOW_ARC) SPRINGEN
+                    self.get_logger().info(f"✓ {self.TARGET_RADIUS}m Radius erreicht. Berechne Kreisbahn...")
+                    opening_angle = math.atan2(self.WAYPOINT_OPENING[1] - self.HUT_CENTER[1], self.WAYPOINT_OPENING[0] - self.HUT_CENTER[0])
+                    current_angle_on_circle = math.atan2(current_pos_vec[1] - self.HUT_CENTER[1], current_pos_vec[0] - self.HUT_CENTER[0])
+                    angle_diff_to_opening = (opening_angle - current_angle_on_circle + math.pi) % (2 * math.pi) - math.pi
+                    self.arc_direction = 1.0 if angle_diff_to_opening > 0 else -1.0
+                    self.get_logger().info(f"✓ Kürzeste Richtung: {'CCW' if self.arc_direction > 0 else 'CW'}. Starte Kreisbahn.")
                     self.change_state(DockingState.FOLLOW_ARC)
             else:
                 self.get_logger().warn("Roboter ist ZU NAH am Zentrum, fahre zurück.")
@@ -314,75 +301,39 @@ class DockingController(Node):
             
         # --- 5. Kreis fahren (als Polygon-Annäherung) ---
         if self.state == DockingState.FOLLOW_ARC:
+            # (Diese Logik bleibt unverändert)
+            POLYGON_SEGMENT_LENGTH = 0.5
+            GOAL_REACHED_TOLERANCE = 0.15
             
-            POLYGON_SEGMENT_LENGTH = 0.5  # 50cm pro Segment
-            GOAL_REACHED_TOLERANCE = 0.15 # 15cm Toleranz pro Segment
+            current_angle_on_circle = math.atan2(current_pos_vec[1] - self.HUT_CENTER[1], current_pos_vec[0] - self.HUT_CENTER[0])
+            opening_angle = math.atan2(self.WAYPOINT_OPENING[1] - self.HUT_CENTER[1], self.WAYPOINT_OPENING[0] - self.HUT_CENTER[0])
+            angle_err_to_goal = (opening_angle - current_angle_on_circle + math.pi) % (2 * math.pi) - math.pi
             
-            # --- 1. Stopp-Bedingung: Sind wir an der Öffnung? ---
-            # (Diese Logik bleibt gleich)
-            current_angle_on_circle = math.atan2(
-                current_pos_vec[1] - self.HUT_CENTER[1],
-                current_pos_vec[0] - self.HUT_CENTER[0]
-            )
-            opening_angle = math.atan2(
-                self.WAYPOINT_OPENING[1] - self.HUT_CENTER[1],
-                self.WAYPOINT_OPENING[0] - self.HUT_CENTER[0]
-            )
-            
-            angle_err_to_goal = opening_angle - current_angle_on_circle
-            angle_err_to_goal = (angle_err_to_goal + math.pi) % (2 * math.pi) - math.pi
-            
-            # Stoppen, wenn wir sehr nah am Zielwinkel sind
-            if abs(angle_err_to_goal) < 0.01: # muss relativ akkurat sein
+            if abs(angle_err_to_goal) < 0.01:
                 self.get_logger().info("✓ Schritt 6: Kreisbahn beendet (nahe Öffnung).")
                 self.change_state(DockingState.ALIGN_TO_HUT)
                 self.publish_twist(0.0, 0.0)
-                self.current_arc_goal = None # Ziel zurücksetzen
+                self.current_arc_goal = None
                 return
 
-            # --- 2. Ziel-Management: Haben wir ein Ziel oder brauchen wir ein neues? ---
-            
             if self.current_arc_goal is None:
-                # Wir haben kein Ziel (oder haben das letzte erreicht)
-                # Berechne das NÄCHSTE Polygon-Vertex
-                
-                # Der Winkel eines Segments (s = r * theta -> theta = s / r)
                 segment_angle_rad = POLYGON_SEGMENT_LENGTH / self.TARGET_RADIUS
-                
-                # Wende den Winkel in die korrekte Richtung an
                 next_goal_angle = current_angle_on_circle + (self.arc_direction * segment_angle_rad)
-                
-                # Konvertiere den Winkel zurück in eine (x, y) Koordinate
                 goal_x = self.HUT_CENTER[0] + self.TARGET_RADIUS * math.cos(next_goal_angle)
                 goal_y = self.HUT_CENTER[1] + self.TARGET_RADIUS * math.sin(next_goal_angle)
-                
                 self.current_arc_goal = np.array([goal_x, goal_y])
                 self.get_logger().info(f"Neues Polygon-Ziel: ({goal_x:.2f}, {goal_y:.2f})")
 
-            # --- 3. Fahre zum aktuellen Ziel-Vertex ---
-            
-            # Nutze die simple_go_to Funktion, um zum Vertex zu fahren
             if self.simple_go_to(self.current_arc_goal, tolerance=GOAL_REACHED_TOLERANCE):
-                # Wir haben das Vertex erreicht!
                 self.get_logger().info("Polygon-Vertex erreicht.")
-                # Setze das Ziel auf None, damit in der nächsten Iteration
-                # das NÄCHSTE Ziel berechnet wird.
                 self.current_arc_goal = None
-                # simple_go_to hat bereits einen Stopp-Befehl (0,0) gesendet
-            
-            # Die simple_go_to() Funktion kümmert sich um das Senden der Twist-Befehle
             return
             
         # --- 6. Zur Hütte ausrichten ---
         if self.state == DockingState.ALIGN_TO_HUT:
-            # Ziel ist der Eingang (oder leicht dahinter)
-            target_theta = math.atan2(
-                self.WAYPOINT_INSIDE[1] - current_pos_vec[1],
-                self.WAYPOINT_INSIDE[0] - current_pos_vec[0]
-            )
-            
-            angle_err = target_theta - current_theta
-            angle_err = (angle_err + math.pi) % (2 * math.pi) - math.pi
+            # (Diese Logik bleibt unverändert)
+            target_theta = math.atan2(self.WAYPOINT_INSIDE[1] - current_pos_vec[1], self.WAYPOINT_INSIDE[0] - current_pos_vec[0])
+            angle_err = (target_theta - current_theta + math.pi) % (2 * math.pi) - math.pi
             
             if abs(angle_err) < 0.05:  # ~3 Grad
                 self.get_logger().info("✓ Schritt 5: Grob zur Hütte ausgerichtet. Starte Endausrichtung.")
@@ -393,175 +344,152 @@ class DockingController(Node):
                 self.publish_twist(0.0, angular_vel)
             return
             
-        # --- 7. Endgültige Ausrichtung (Nur Drehen) ---
+        # ==========================================================
+        # --- 7. Endgültige Ausrichtung (PIXEL-BASIERT) ---
+        # ==========================================================
         if self.state == DockingState.FINAL_ALIGNMENT:
             
-            # NEU: Prüfen, ob wir gerade ein "Nudge"-Manöver (10cm) fahren
-            if hasattr(self, '_align_relocating') and self._align_relocating:
+            # --- A: Führe 10cm-Nudge aus, falls aktiv ---
+            if self._align_nudge_active:
                 now = self.get_clock().now()
-                time_since_relocate_start = (now - self._align_relocate_start_time).nanoseconds / 1e9
+                time_since_nudge_start = (now - self._align_nudge_start_time).nanoseconds / 1e9
                 
-                # Fahre für 1.0 Sekunde mit 0.1 m/s (= 10cm)
-                RELOCATE_DURATION = 1.0 # Sekunden
-                RELOCATE_SPEED = 0.1    # m/s
-
-                if time_since_relocate_start < RELOCATE_DURATION: 
-                    self.publish_twist(RELOCATE_SPEED, 0.0) # Langsam vor
-                    return # WICHTIG: Schleife hier verlassen, bis Manöver fertig ist
+                if time_since_nudge_start < self.NUDGE_DURATION: 
+                    self.publish_twist(self.NUDGE_SPEED, 0.0) # Langsam vor
+                    return # Warten, bis Manöver fertig ist
                 else:
                     self.publish_twist(0.0, 0.0) # Stopp
-                    self.get_logger().info("10cm Vorfahrt beendet. Versuche Ausrichtung erneut.")
-                    self._align_relocating = False # Manöver beendet
-                    # Führe den Rest der Funktion (den try-Block) normal aus
+                    self.get_logger().info("10cm Vorfahrt (Nudge) beendet. Versuche Ausrichtung erneut.")
+                    self._align_nudge_active = False # Manöver beendet
             
-            try:
-                # Normaler Versuch, das Tag zu finden
-                t = self.tf_buffer.lookup_transform(
-                    'robot/chassis',
-                    self.DOCKING_TARGET_FRAME,
-                    rclpy.time.Time()
-                )
-                trans = t.transform.translation
+            # --- B: Prüfe, ob Tag sichtbar ist ---
+            detection_age_sec = (self.get_clock().now() - self.last_detection_time).nanoseconds / 1e9
+            tag_visible = self.last_target_detection is not None and detection_age_sec < 1.0 # 1 Sekunde Toleranz
+            
+            if tag_visible:
+                # --- C: Tag sichtbar -> Ausrichten ---
                 
-                # Nur Winkelfehler berechnen
-                angle_err = math.atan2(trans.y, trans.x)
-
-                # Toleranz für "gerade"
-                if abs(angle_err) < 0.001: # ~1.4 Grad
-                    self.get_logger().info("✓ End-Ausrichtung abgeschlossen. Starte Einfahrt.")
+                # Berechne Pixel-Fehler (nur horizontal)
+                pixel_error = self.IMAGE_CENTER_X - self.last_target_detection.centre.x
+                
+                if abs(pixel_error) <= self.PIXEL_TOLERANCE:
+                    # Ziel-Ausrichtung erreicht
+                    self.get_logger().info(f"✓ Pixel-Ausrichtung OK (Fehler: {pixel_error:.1f}px). Wechsle zu DOCKING.")
                     self.publish_twist(0.0, 0.0)
-                    self.change_state(DockingState.DOCKING) # Jetzt zu State 8 (DOCKING)
+                    self.change_state(DockingState.DOCKING)
                 else:
-                    # P-Regler nur für Drehung
-                    angular_vel = np.clip(2.5 * angle_err, -self.DOCKING_SPEED_ANGULAR, self.DOCKING_SPEED_ANGULAR)
-                    # KORREKTUR: throttle_skip_count ersetzt durch throttle_duration_sec
-                    self.get_logger().info(f"Richte aus... Winkelfehler: {math.degrees(angle_err):.2f}°", throttle_duration_sec=5.0)
-                    self.publish_twist(0.0, angular_vel) # WICHTIG: linear_vel = 0.0
-            
-            except TransformException as e:
-                # GEÄNDERT: Starte das Relocate-Manöver, wenn wir nicht schon dabei sind
-                if not (hasattr(self, '_align_relocating') and self._align_relocating):
-                    self.get_logger().warn(f"Tag '{self.DOCKING_TARGET_FRAME}' während Ausrichtung verloren! Starte 10cm Vorfahrt.")
-                    self._align_relocating = True
-                    self._align_relocate_start_time = self.get_clock().now()
+                    # P-Regler für Drehung basierend auf Pixel-Fehler
+                    angular_vel = np.clip(self.K_P_PIXEL * pixel_error, 
+                                          -self.DOCKING_SPEED_ANGULAR, 
+                                          self.DOCKING_SPEED_ANGULAR)
+                    
+                    self.get_logger().info(f"Richte Kamera auf Pixel... Fehler: {pixel_error:.1f}px, Vel: {angular_vel:.2f} rad/s", throttle_duration_sec=2.0)
+                    self.publish_twist(0.0, angular_vel)
+
+            else:
+                # --- D: Tag nicht sichtbar -> 10cm Nudge (wie gewünscht) ---
+                if not self._align_nudge_active: # Starte Nudge nur, wenn nicht schon aktiv
+                    self.get_logger().warn(f"Tag {self.DOCKING_TARGET_ID} in FINAL_ALIGNMENT nicht sichtbar. Starte 10cm Nudge.")
+                    self._align_nudge_active = True
+                    self._align_nudge_start_time = self.get_clock().now()
+                    self.publish_twist(0.0, 0.0) # Stoppe evtl. Drehung
             
             return
             
-        # --- 8. In die Hütte fahren (Visual Servoing) ---
-        if self.state == DockingState.DOCKING: # ALT: 7
+        # --- 8. In die Hütte fahren (10cm-Schritte + Distanz-Check) ---
+        if self.state == DockingState.DOCKING:
+            
+            # --- A: Führe 10cm-Fahrt aus, falls aktiv ---
+            if self._docking_drive_active:
+                now = self.get_clock().now()
+                time_since_drive_start = (now - self._docking_drive_start_time).nanoseconds / 1e9
+                
+                if time_since_drive_start < self.NUDGE_DURATION: 
+                    self.publish_twist(self.NUDGE_SPEED, 0.0) # Langsam vor
+                    return # Warten, bis Manöver fertig ist
+                else:
+                    self.publish_twist(0.0, 0.0) # Stopp
+                    self.get_logger().info("10cm Fahrt beendet. Gehe zurück zu FINAL_ALIGNMENT.")
+                    self._docking_drive_active = False # Manöver beendet
+                    self.change_state(DockingState.FINAL_ALIGNMENT) # Zurück zur Ausrichtung
+                    return
+            
+            # --- B: Nicht am Fahren? Prüfe Distanz (mit TF) & starte ggf. Fahrt ---
             try:
-                # ... (lookup_transform bleibt gleich)
+                # Die Distanzprüfung MUSS TF verwenden, da Pixelgröße kein
+                # zuverlässiges Distanzmaß ist.
                 t = self.tf_buffer.lookup_transform(
-                    'robot/chassis',
+                    'robot/chassis', # Physischer Abstand vom Chassis
                     self.DOCKING_TARGET_FRAME,
                     rclpy.time.Time()
                 )
-                
                 trans = t.transform.translation
-                
-                # 1. Distanzfehler (vor/zurück)
+                # Distanzfehler (vor/zurück)
                 dist_err = trans.x - self.DOCKING_TARGET_DISTANCE
                 
-                # 2. Winkelfehler (links/rechts)
-                angle_err = math.atan2(trans.y, trans.x)
-                
-                # --- Regler ---
-                
-                # Stopp-Bedingung: Zielabstand erreicht
+                # Stopp-Bedingung: Zielabstand erreicht (10cm Toleranz)
                 if abs(dist_err) < 0.1:
-                    self.get_logger().info("✓✓✓ SCHRITT 9: DOCKING ERFOLGREICH! ✓✓✓")
-                    self.change_state(DockingState.FINAL_STOP) # Zu State 9
+                    self.get_logger().info("✓✓✓ DOCKING ERFOLGREICH (Distanz-Check)! ✓✓✓")
+                    self.change_state(DockingState.FINAL_STOP)
                     self.publish_twist(0.0, 0.0)
                     return
 
-                # P-Regler für lineare Geschwindigkeit
-                linear_vel = np.clip(0.8 * dist_err, -self.DOCKING_SPEED_LINEAR, self.DOCKING_SPEED_LINEAR)
-                
-                # P-Regler für Winkelgeschwindigkeit (für Feinkorrektur)
-                angular_vel = np.clip(1.5 * angle_err, -self.DOCKING_SPEED_ANGULAR, self.DOCKING_SPEED_ANGULAR)
-
-                # Diese Sperre (falls noch vorhanden) ist jetzt weniger kritisch,
-                # da der Winkelfehler durch State 7 schon klein sein sollte.
-                if abs(angle_err) > 0.3: # ~17 Grad
-                    linear_vel = 0.0 # Stoppe Vorwärtsbewegung, wenn Ausrichtung stark abweicht
-                    
-                self.publish_twist(linear_vel, angular_vel)
+                # Distanz noch zu groß: Starte 10cm Fahrt
+                # (Wir wissen aus State 7, dass die Pixel-Ausrichtung < 10px war)
+                self.get_logger().info(f"Distanz {trans.x:.2f}m (noch > {self.DOCKING_TARGET_DISTANCE:.1f}m). Starte 10cm Vorfahrt.")
+                self._docking_drive_active = True
+                self._docking_drive_start_time = self.get_clock().now()
 
             except TransformException as e:
-                self.get_logger().error(f"Tag '{self.DOCKING_TARGET_FRAME}' während des Dockings verloren! Stoppe.")
+                self.get_logger().error(f"Tag '{self.DOCKING_TARGET_FRAME}' für Distanz-Check verloren! Gehe zurück zu FINAL_ALIGNMENT. Fehler: {e}")
                 self.publish_twist(0.0, 0.0)
-                # Optional: Hier könnte man einen Fehler-Zustand einleiten
+                self.change_state(DockingState.FINAL_ALIGNMENT)
             
             return
             
         # --- 9. Ziel erreicht ---
-        if self.state == DockingState.FINAL_STOP: # ALT: 8
+        if self.state == DockingState.FINAL_STOP:
             self.publish_twist(0.0, 0.0)
             self.control_timer.cancel()
             self.debug_timer.cancel()
+            self.get_logger().info("Docking abgeschlossen. Alle Timer gestoppt.")
             return
 
     def simple_go_to(self, target_pos: np.ndarray, tolerance: float) -> bool:
-        """
-        Einfacher P-Regler zum Anfahren eines Zielpunkts
-        Returns: True wenn Ziel erreicht
-        """
+        """Einfacher P-Regler zum Anfahren eines Zielpunkts (bleibt unverändert)"""
         if self.current_odom_pose is None:
             return False
 
-        # Parameter
-        K_linear = 1.0    # ALT: 0.5 oder 0.7 (Schnellere Beschleunigung)
+        K_linear = 1.0
         K_angular = 2.0
-        max_linear = 1.5  # ALT: 0.5 oder 0.8 (Höhere Endgeschwindigkeit)
+        max_linear = 1.5
         max_angular = 1.0
 
         current_pos = np.array(self.current_odom_pose[:2])
         current_theta = self.current_odom_pose[2]
         
-        # Abstand zum Ziel
         dist_err = np.linalg.norm(target_pos - current_pos)
         
         if dist_err < tolerance:
             self.publish_twist(0.0, 0.0)
             return True
 
-        # Winkel zum Ziel
         angle_to_target = math.atan2(
             target_pos[1] - current_pos[1],
             target_pos[0] - current_pos[0]
         )
         
-        angle_err = angle_to_target - current_theta
-        # Normalisieren auf [-pi, pi]
-        angle_err = (angle_err + math.pi) % (2 * math.pi) - math.pi
+        angle_err = (angle_to_target - current_theta + math.pi) % (2 * math.pi) - math.pi
         
-        # Wenn stark falsch ausgerichtet: nur drehen
         if abs(angle_err) > 0.3:  # ~17 Grad
             linear_vel = 0.0
             angular_vel = np.clip(K_angular * angle_err, -max_angular, max_angular)
         else:
-            # Fahren und korrigieren
             linear_vel = np.clip(K_linear * dist_err, 0.0, max_linear)
             angular_vel = np.clip(K_angular * angle_err, -max_angular, max_angular)
-            
-            # Geschwindigkeit reduzieren bei großem Winkelfehler
             linear_vel *= (1.0 - abs(angle_err) / math.pi)
 
         self.publish_twist(linear_vel, angular_vel)
-        
-        # Debug-Ausgabe alle 5 Sekunden
-        if not hasattr(self, '_last_nav_debug_time'):
-            self._last_nav_debug_time = 0.0
-        
-        current_time = self.get_clock().now().nanoseconds / 1e9
-        if current_time - self._last_nav_debug_time > 5.0:
-            self._last_nav_debug_time = current_time
-            self.get_logger().info(
-                f"🎯 Navigation (GoTo): Dist={dist_err:.2f}m, "
-                f"Angle={math.degrees(angle_err):.1f}°, "
-                f"Vel=(lin={linear_vel:.2f}, ang={angular_vel:.2f})"
-            )
-        
         return False
 
     def publish_twist(self, linear: float, angular: float):
