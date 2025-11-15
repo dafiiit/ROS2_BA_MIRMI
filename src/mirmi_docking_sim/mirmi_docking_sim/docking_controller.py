@@ -385,8 +385,8 @@ class DockingController(Node):
             angle_err = (angle_err + math.pi) % (2 * math.pi) - math.pi
             
             if abs(angle_err) < 0.05:  # ~3 Grad
-                self.get_logger().info("✓ Schritt 7: Zur Hütte ausgerichtet.")
-                self.change_state(DockingState.DOCKING)
+                self.get_logger().info("✓ Schritt 5: Grob zur Hütte ausgerichtet. Starte Endausrichtung.")
+                self.change_state(DockingState.FINAL_ALIGNMENT)
                 self.publish_twist(0.0, 0.0)
             else:
                 angular_vel = np.clip(1.5 * angle_err, -0.5, 0.5)
@@ -417,11 +417,9 @@ class DockingController(Node):
                     angular_vel = np.clip(2.5 * angle_err, -self.DOCKING_SPEED_ANGULAR, self.DOCKING_SPEED_ANGULAR)
                     self.get_logger().info(f"Richte aus... Winkelfehler: {math.degrees(angle_err):.2f}°", throttle_skip_count=5)
                     self.publish_twist(0.0, angular_vel) # WICHTIG: linear_vel = 0.0
-            
-            except TransformException as e:
-                self.get_logger().error(f"Tag '{self.DOCKING_TARGET_FRAME}' während Ausrichtung verloren! Gehe zurück zu Suche.")
-                self.change_state(DockingState.SEARCHING_FOR_DOCK_TAG) # Zurück zu State 6
-            
+            	except TransformException as e:
+            		self.get_logger().error(f"Tag '{self.DOCKING_TARGET_FRAME}' während Ausrichtung verloren! Gehe zurück zu Suche.", throttle_duration_sec=5.0)
+                	self.change_state(DockingState.SEARCHING_FOR_DOCK_TAG) # Zurück zu State 6
             return
             
         # --- 8. In die Hütte fahren (Visual Servoing) ---

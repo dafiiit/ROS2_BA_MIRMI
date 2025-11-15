@@ -64,7 +64,7 @@ def generate_launch_description():
         ],
         parameters=[{
             'family': '36h11',
-            'size': 0.20,
+            'size': 0.40,
             'max_hamming': 0,
             # Versuche mehrere mögliche Parameternamen für das annotierte Bild
             'image_transport': 'raw',
