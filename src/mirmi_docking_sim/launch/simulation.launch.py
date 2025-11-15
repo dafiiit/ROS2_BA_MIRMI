@@ -72,24 +72,7 @@ def generate_launch_description():
             'publish_tf': True,
         }]
     )
-    
-  # 6. Static Transforms für alle AprilTags in der Welt (Neuer Stil)
-    static_tag_0_tf = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='static_tag_0_publisher',
-        arguments=[
-            '--x', '3.0', 
-            '--y', '0.0', 
-            '--z', '0.5',
-            '--yaw', '0.0', 
-            '--pitch', '1.5708', 
-            '--roll', '0.0',
-            '--frame-id', 'world',
-            '--child-frame-id', 'tag36_11_00000'
-        ]
-    )
-    
+        
     # Tag 1: Hütte Innen Rückwand (ID 1)
     static_tag_1_tf = Node(
         package='tf2_ros',
@@ -190,7 +173,6 @@ def generate_launch_description():
  
         odom_tf_node, 
         
-        static_tag_0_tf,
         static_tag_1_tf,
         static_tag_2_tf,
         static_tag_3_tf,

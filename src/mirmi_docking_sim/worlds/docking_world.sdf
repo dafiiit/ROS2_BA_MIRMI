@@ -40,10 +40,12 @@
   <uri>model://robot</uri>
   </include>
 
+    <!-- Auch hier hab ich den April Tag auskommentiert, da die an der docking station reichen
     <include>
       <uri>model://Apriltag36_11_00000</uri>
       <pose>3 0 0.5 0 1.5708 0</pose> 
-    </include>
+    </include> 
+    -->
     
     <include>
       <uri>model://april_hut</uri>
