@@ -1,0 +1,11 @@
+digraph G {
+"world" -> "robot/chassis"[label=" Broadcaster: default_authority\nAverage rate: 42.197\nBuffer length: 4.479\nMost recent transform: 1763210734.741466\nOldest transform: 1763210730.262481\n"];
+"world" -> "tag36_11_00002"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"world" -> "tag36_11_00003"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"world" -> "tag36_11_00001"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"world" -> "tag36_11_00004"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+edge [style=invis];
+ subgraph cluster_legend { style=bold; color=black; label ="view_frames Result";
+"Recorded at time: 1763210734.7500336"[ shape=plaintext ] ;
+}->"world";
+}

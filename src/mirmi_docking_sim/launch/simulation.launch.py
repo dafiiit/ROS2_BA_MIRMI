@@ -165,6 +165,23 @@ def generate_launch_description():
     	name='odom_to_tf_publisher',
     	output='screen'
 	)
+	
+    #Definiert die Position der Kamera am Roboter
+    static_camera_tf = Node(
+	package='tf2_ros',
+	executable='static_transform_publisher',
+	name='static_camera_publisher',
+	arguments=[
+        '--x', '1.0', 
+        '--y', '0.0', 
+        '--z', '0.25',
+        '--yaw', '0.0', 
+        '--pitch', '0.0', 
+        '--roll', '0.0',
+        '--frame-id', 'robot/chassis',          # Übergeordneter Frame
+        '--child-frame-id', 'robot/chassis/camera_sensor' # Frame-Name aus Gazebo
+        ]
+        )
 
     return LaunchDescription([
         set_env,
@@ -174,6 +191,7 @@ def generate_launch_description():
         apriltag_node,
  
         odom_tf_node, 
+        static_camera_tf,
         
         static_tag_1_tf,
         static_tag_2_tf,

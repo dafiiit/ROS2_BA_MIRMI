@@ -21,9 +21,6 @@
               			<metalness>0.0</metalness>
             		</metal>
           	</pbr>
-        	
-
-        	<!-- Vorherige Line: <emissive_map>materials/textures/tag36_11_00001.png</emissive_map> -->
         </material>
       </visual>
       <collision name="collision">
