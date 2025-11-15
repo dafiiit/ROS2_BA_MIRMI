@@ -44,6 +44,7 @@ setup(
         'console_scripts': [
             'camera_info_sync = mirmi_docking_sim.camera_info_sync:main',
             'apriltag_visualizer = mirmi_docking_sim.apriltag_visualizer:main',
+            'docking_controller = mirmi_docking_sim.docking_controller:main',
         ],
     },
 )

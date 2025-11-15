@@ -69,23 +69,24 @@ def generate_launch_description():
             # Versuche mehrere mögliche Parameternamen für das annotierte Bild
             'image_transport': 'raw',
             'publish_tag_detections_image': True,
+            'publish_tf': True,
         }]
     )
     
-    # 6. Static Transforms für alle AprilTags in der Welt
+  # 6. Static Transforms für alle AprilTags in der Welt (Neuer Stil)
     static_tag_0_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='static_tag_0_publisher',
         arguments=[
-            # X, Y, Z
-            '3.0', '0.0', '0.5',
-            # Yaw, Pitch, Roll (in Radiant!)
-            '0.0', '1.5708', '0.0',
-            # Parent-Frame
-            'world',
-            # Child-Frame
-            'tag36_11_00000'
+            '--x', '3.0', 
+            '--y', '0.0', 
+            '--z', '0.5',
+            '--yaw', '0.0', 
+            '--pitch', '1.5708', 
+            '--roll', '0.0',
+            '--frame-id', 'world',
+            '--child-frame-id', 'tag36_11_00000'
         ]
     )
     
@@ -95,9 +96,14 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='static_tag_1_publisher',
         arguments=[
-            '3.601', '2.0', '0.75',     # X Y Z
-            '0.0', '-1.5708', '0.0',    # Yaw Pitch Roll
-            'world', 'tag36_11_00001'
+            '--x', '3.601', 
+            '--y', '2.0', 
+            '--z', '0.75',
+            '--yaw', '0.0', 
+            '--pitch', '-1.5708', 
+            '--roll', '0.0',
+            '--frame-id', 'world', 
+            '--child-frame-id', 'tag36_11_00001'
         ]
     )
     
@@ -107,9 +113,14 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='static_tag_2_publisher',
         arguments=[
-            '3.499', '2.0', '0.75',     # X Y Z
-            '0.0', '1.5708', '0.0',     # Yaw Pitch Roll
-            'world', 'tag36_11_00002'
+            '--x', '3.499', 
+            '--y', '2.0', 
+            '--z', '0.75',
+            '--yaw', '0.0', 
+            '--pitch', '1.5708', 
+            '--roll', '0.0',
+            '--frame-id', 'world', 
+            '--child-frame-id', 'tag36_11_00002'
         ]
     )
     
@@ -119,9 +130,14 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='static_tag_3_publisher',
         arguments=[
-            '5.0', '3.101', '0.75',     # X Y Z
-            '0.0', '0.0', '1.5708',     # Yaw Pitch Roll
-            'world', 'tag36_11_00003'
+            '--x', '5.0', 
+            '--y', '3.101', 
+            '--z', '0.75',
+            '--yaw', '0.0', 
+            '--pitch', '0.0', 
+            '--roll', '1.5708',
+            '--frame-id', 'world', 
+            '--child-frame-id', 'tag36_11_00003'
         ]
     )
     
@@ -131,9 +147,14 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='static_tag_4_publisher',
         arguments=[
-            '5.0', '0.899', '0.75',     # X Y Z
-            '0.0', '0.0', '-1.5708',    # Yaw Pitch Roll
-            'world', 'tag36_11_00004'
+            '--x', '5.0', 
+            '--y', '0.899', 
+            '--z', '0.75',
+            '--yaw', '0.0', 
+            '--pitch', '0.0', 
+            '--roll', '-1.5708',
+            '--frame-id', 'world', 
+            '--child-frame-id', 'tag36_11_00004'
         ]
     )
     
@@ -142,6 +163,14 @@ def generate_launch_description():
         package='mirmi_docking_sim',
         executable='apriltag_visualizer',
         name='apriltag_visualizer',
+        output='screen'
+    )
+    
+    # 8. NEUER DOCKING CONTROLLER
+    docking_controller_node = Node(
+        package='mirmi_docking_sim',
+        executable='docking_controller',
+        name='docking_controller',
         output='screen'
     )
 
@@ -158,5 +187,7 @@ def generate_launch_description():
         static_tag_3_tf,
         static_tag_4_tf,
         
-        visualizer_node
+        visualizer_node,
+        
+        docking_controller_node
     ])
