@@ -55,9 +55,9 @@ class DockingController(Node):
         self.PIXEL_TOLERANCE = 10.0              # 10 Pixel Toleranz (horizontal)
         self.K_P_PIXEL = 0.005                   # P-Regler für Pixel-Fehler (Tuning nötig!)
         
-        # Parameter für 10cm-Fahrmanöver
-        self.NUDGE_SPEED = 0.1  # 0.1 m/s
-        self.NUDGE_DURATION = 1.0 # 1.0s * 0.1m/s = 0.1m = 10cm
+        # Parameter für 30cm-Fahrmanöver
+        self.NUDGE_SPEED = 0.15  # 0.15 m/s
+        self.NUDGE_DURATION = 2.0 # 2.0s * 0.15m/s = 0.1m = 30cm
         
         # Aktuelle Roboter-Pose (x, y, theta) aus Odometrie
         self.current_odom_pose = None

@@ -18,6 +18,13 @@
   ros_type_name: "sensor_msgs/msg/JointState"
   gz_type_name: "gz.msgs.Model"
   direction: GZ_TO_ROS
+  
+  # 7. Roboter Teleportation
+- ros_topic_name: "/model/robot/set_pose"
+  gz_topic_name: "/model/robot/pose"
+  ros_type_name: "geometry_msgs/msg/Pose"
+  gz_type_name: "gz.msgs.Pose"
+  direction: ROS_TO_GZ
 
 # 4. RGB-Kamera (für AprilTags)
 - ros_topic_name: "/camera/image_raw"
@@ -41,7 +48,7 @@
   gz_type_name: "gz.msgs.CameraInfo"
   direction: GZ_TO_ROS
 
-# 6. Robot Pose (Optional, aber nützlich für Debugging)
+# 6. Robot Pose
 - ros_topic_name: "/model/robot/pose"
   gz_topic_name: "/model/robot/pose"
   ros_type_name: "geometry_msgs/msg/PoseArray"
