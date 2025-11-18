@@ -2,7 +2,7 @@
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String
 import numpy as np
@@ -60,6 +60,9 @@ class DockingTestRunner(Node):
         
         # Schneller Timer für die Logik
         self.timer = self.create_timer(0.1, self.test_loop)
+        
+        # Publisher für den Reset
+        self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped, '/initialpose', 10)
 
     def setup_csv(self):
         with open(self.csv_filename, mode='w', newline='') as file:
@@ -134,7 +137,27 @@ class DockingTestRunner(Node):
                 self.get_logger().error(f"Teleport Fehler (Code {e.returncode}). Befehl war falsch.")
         except Exception as e:
             self.get_logger().error(f"Unbekannter Fehler: {e}")
-
+            
+	# Controller informieren 
+	# Wir senden dem Controller die exakt gleiche Position
+        reset_msg = PoseWithCovarianceStamped()
+        reset_msg.header.stamp = self.get_clock().now().to_msg()
+        reset_msg.header.frame_id = "world" # oder map
+        
+        reset_msg.pose.pose.position.x = x
+        reset_msg.pose.pose.position.y = y
+        reset_msg.pose.pose.position.z = 0.0
+        
+        reset_msg.pose.pose.orientation.x = q[0]
+        reset_msg.pose.pose.orientation.y = q[1]
+        reset_msg.pose.pose.orientation.z = q[2]
+        reset_msg.pose.pose.orientation.w = q[3]
+        
+        # WICHTIG: Ein paar mal publishen oder kurz warten, damit es sicher ankommt
+        # Da wir im Loop sind, reicht einmal, aber wir loggen es.
+        self.initial_pose_pub.publish(reset_msg)
+        self.get_logger().info(f"-> Reset-Signal an Controller gesendet: {x:.2f}, {y:.2f}")
+        
     def test_loop(self):
         if not self.current_pose: return # Warten auf Odometrie
 

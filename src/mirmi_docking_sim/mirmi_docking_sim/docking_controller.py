@@ -5,7 +5,7 @@ from rclpy.node import Node
 from enum import Enum
 import math
 import numpy as np
-from geometry_msgs.msg import Twist, PoseArray
+from geometry_msgs.msg import Twist, PoseArray, PoseWithCovarianceStamped
 from apriltag_msgs.msg import AprilTagDetectionArray
 from nav_msgs.msg import Odometry
 import tf2_ros
@@ -30,6 +30,11 @@ class DockingState(Enum):
 class DockingController(Node):
     def __init__(self):
         super().__init__('docking_controller')
+        
+        self.odom_offset_x = 0.0
+        self.odom_offset_y = 0.0
+        self.odom_offset_theta = 0.0
+        self.raw_odom_pose = None # Zum Speichern der "rohen" Odom-Werte
         
         # 1. Parameter Logik (funktioniert jetzt sicher)
         self.declare_parameter('use_ground_truth', False)
@@ -111,6 +116,14 @@ class DockingController(Node):
         initial_state_msg = String()
         initial_state_msg.data = self.state.name
         self.state_pub.publish(initial_state_msg)
+        
+        # Subscriber für manuellen Reset (Teleport)
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            '/initialpose',
+            self.set_initial_pose_callback,
+            10
+        )
 
     def debug_status(self):
         if self.current_odom_pose is None:
@@ -130,14 +143,51 @@ class DockingController(Node):
             self.get_logger().info(f"✓ Ground Truth empfangen! ({pos.x:.2f}, {pos.y:.2f})")
             self.odom_received_once = True
     
+    def set_initial_pose_callback(self, msg):
+        if self.raw_odom_pose is None:
+            self.get_logger().warn("Kann Pose nicht setzen - noch keine Odom empfangen!")
+            return
+
+        # 1. Wo sollen wir sein? (Vom Test-Runner geschickt)
+        target_x = msg.pose.pose.position.x
+        target_y = msg.pose.pose.position.y
+        
+        q = msg.pose.pose.orientation
+        _, _, target_theta = euler_from_quaternion([q.x, q.y, q.z, q.w])
+
+        # 2. Wo sind wir laut Encoder gerade?
+        raw_x, raw_y, raw_theta = self.raw_odom_pose
+
+        # 3. Offset berechnen: Offset = Soll - Ist
+        self.odom_offset_x = target_x - raw_x
+        self.odom_offset_y = target_y - raw_y
+        self.odom_offset_theta = target_theta - raw_theta
+        
+        self.get_logger().info(f"⚠️ TELEPORT ERKANNT! Neuer Offset gesetzt: x={self.odom_offset_x:.2f}, y={self.odom_offset_y:.2f}")
+
     def odom_callback(self, msg: Odometry):
+        # Rohdaten extrahieren
         pos = msg.pose.pose.position
         orient = msg.pose.pose.orientation
-        _, _, yaw = euler_from_quaternion([orient.x, orient.y, orient.z, orient.w])
+        _, _, raw_yaw = euler_from_quaternion([orient.x, orient.y, orient.z, orient.w])
         
-        self.current_odom_pose = (pos.x, pos.y, yaw)
+        # Speichern für die Offset-Berechnung
+        self.raw_odom_pose = (pos.x, pos.y, raw_yaw)
+
+        # --- HIER IST DER MATHEMATISCHE TRICK ---
+        # Wir addieren den Offset auf die Rohdaten
+        eff_x = pos.x + self.odom_offset_x
+        eff_y = pos.y + self.odom_offset_y
+        eff_yaw = raw_yaw + self.odom_offset_theta
+        
+        # Winkel normalisieren (-pi bis pi), damit der Controller nicht verwirrt wird
+        eff_yaw = (eff_yaw + math.pi) % (2 * math.pi) - math.pi
+
+        # Das ist jetzt die Pose, mit der der Controller arbeitet
+        self.current_odom_pose = (eff_x, eff_y, eff_yaw)
+
         if not self.odom_received_once:
-            self.get_logger().info(f"✓ ODOMETRIE EMPFANGEN! ({pos.x:.2f}, {pos.y:.2f})")
+            self.get_logger().info(f"✓ ODOMETRIE EMPFANGEN (mit Offset)!")
             self.odom_received_once = True
 
     def change_state(self, new_state: DockingState):
