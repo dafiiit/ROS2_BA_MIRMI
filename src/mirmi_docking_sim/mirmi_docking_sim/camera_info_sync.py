@@ -3,7 +3,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo
 from sensor_msgs.msg import Image  # NEUER IMPORT
 
-class FakeCameraInfoPublisher(Node):
+
+class CameraInfoSync(Node):
     def __init__(self):
         super().__init__('fake_camera_info_publisher')
         
@@ -56,7 +57,7 @@ class FakeCameraInfoPublisher(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = FakeCameraInfoPublisher()
+    node = CameraInfoSync()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()

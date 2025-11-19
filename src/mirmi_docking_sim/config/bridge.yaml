@@ -52,8 +52,8 @@
     durability: volatile
   
     # 7. Roboter Teleportation
-- ros_topic_name: "/model/robot/set_pose"
-  gz_topic_name: "/model/robot/set_pose"
-  ros_type_name: "geometry_msgs/msg/Pose"
-  gz_type_name: "gz.msgs.Pose"
-  direction: ROS_TO_GZ
+#- ros_topic_name: "/model/robot/set_pose"
+#  gz_topic_name: "/model/robot/set_pose"
+#  ros_type_name: "geometry_msgs/msg/Pose"
+#  gz_type_name: "gz.msgs.Pose"
+#  direction: ROS_TO_GZ
