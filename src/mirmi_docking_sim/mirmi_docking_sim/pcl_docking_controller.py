@@ -10,6 +10,7 @@ from enum import Enum
 import math
 from scipy.spatial.transform import Rotation as R
 import time
+from rclpy.qos import qos_profile_sensor_data
 
 class DockingState(Enum):
     WAITING_FOR_PC = 0
@@ -31,7 +32,7 @@ class PCLDockingController(Node):
             PointCloud2,
             '/depth/points',
             self.pc_callback,
-            10
+            qos_profile_sensor_data
         )
         
         # Publishers
@@ -124,7 +125,8 @@ class PCLDockingController(Node):
         # Convert ROS PointCloud2 to numpy
         # We only care about x, y, z
         gen = point_cloud2.read_points(self.latest_pc_msg, field_names=("x", "y", "z"), skip_nans=True)
-        scene_points = np.array(list(gen))
+        # Force numpy array to be float32 (N, 3) to avoid structured array issues
+        scene_points = np.array(list(gen), dtype=np.float32)
         
         if len(scene_points) < 100:
             self.get_logger().warn("Not enough points in cloud.")

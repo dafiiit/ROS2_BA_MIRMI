@@ -5,6 +5,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo
 from sensor_msgs.msg import Image
 
+from rclpy.qos import qos_profile_sensor_data
+
 class DepthCameraInfoSync(Node):
     def __init__(self):
         super().__init__('depth_camera_info_sync')
@@ -14,7 +16,7 @@ class DepthCameraInfoSync(Node):
             Image,
             '/depth/image_raw',
             self.image_callback,
-            10)
+            qos_profile_sensor_data)
         
         # Publish the camera info
         self.publisher_ = self.create_publisher(CameraInfo, '/depth/camera_info', 10)
