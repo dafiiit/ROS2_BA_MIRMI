@@ -125,8 +125,9 @@ class PCLDockingController(Node):
         # Convert ROS PointCloud2 to numpy
         # We only care about x, y, z
         gen = point_cloud2.read_points(self.latest_pc_msg, field_names=("x", "y", "z"), skip_nans=True)
-        # Force numpy array to be float32 (N, 3) to avoid structured array issues
-        scene_points = np.array(list(gen), dtype=np.float32)
+        raw_points = np.array(list(gen)) # This creates a structured array
+        # Extract columns explicitly to ensure (N, 3) float32 array
+        scene_points = np.column_stack((raw_points['x'], raw_points['y'], raw_points['z']))
         
         if len(scene_points) < 100:
             self.get_logger().warn("Not enough points in cloud.")
