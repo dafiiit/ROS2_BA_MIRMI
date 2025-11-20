@@ -118,11 +118,19 @@ def generate_launch_description():
         output='screen',
     )
 
-    # 7. Dein neuer PCL Docking Controller (Placeholder)
-    pcl_controller_node = Node(
+    # 7. PCL Pose Publisher
+    pcl_pose_publisher_node = Node(
         package='mirmi_docking_sim',
-        executable='pcl_docking_controller',
-        name='pcl_docking_controller',
+        executable='pcl_pose_publisher',
+        name='pcl_pose_publisher',
+        output='screen'
+    )
+
+    # 8. Docking Controller (Generic)
+    docking_controller_node = Node(
+        package='mirmi_docking_sim',
+        executable='docking_controller',
+        name='docking_controller',
         output='screen'
     )
 
@@ -136,5 +144,6 @@ def generate_launch_description():
         static_depth_camera_tf,
         depth_info_sync_node,
         point_cloud_container,
-        pcl_controller_node 
+        pcl_pose_publisher_node,
+        docking_controller_node 
     ])

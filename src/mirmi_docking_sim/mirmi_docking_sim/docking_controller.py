@@ -7,6 +7,8 @@ import math
 import numpy as np
 from geometry_msgs.msg import Twist, PoseWithCovarianceStamped, PoseStamped
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import PointCloud2
+from sensor_msgs_py import point_cloud2
 import tf2_ros
 from tf2_ros import TransformException
 from tf_transformations import euler_from_quaternion
@@ -91,12 +93,25 @@ class DockingController(Node):
         self.state_pub = self.create_publisher(String, '/docking_controller/state', state_qos)
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         
-        # WICHTIG: Generischer Subscriber statt AprilTagDetectionArray
         self.pose_sub = self.create_subscription(
             PoseStamped, 
             '/localization/docking_pose', 
             self.pose_callback, 
             10)
+
+        # PointCloud Subscriber for Costmap
+        self.pc_sub = self.create_subscription(
+            PointCloud2,
+            '/depth/points',
+            self.pc_callback,
+            qos_profile_sensor_data
+        )
+        self.local_costmap = None
+        self.costmap_resolution = 0.1 # 10cm grid
+        self.costmap_width = 40 # 4m width
+        self.costmap_height = 40 # 4m height
+        self.costmap_origin_x = 20 # Robot at center X
+        self.costmap_origin_y = 20 # Robot at center Y
        
         self.control_timer = self.create_timer(0.1, self.control_loop)
         
@@ -198,6 +213,80 @@ class DockingController(Node):
             if self.current_odom_pose is not None and not self.has_localized:
                 self.has_localized = True
                 self.change_state(DockingState.GOTO_RADIUS_POINT)
+
+    def pc_callback(self, msg):
+        """
+        Generates a simple local costmap from PointCloud2.
+        Robot is at center.
+        """
+        # Convert to numpy
+        gen = point_cloud2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
+        points = np.array(list(gen))
+        if len(points) == 0: return
+
+        # Filter: Only points in front and relevant height
+        # Camera frame: Z forward, X right, Y down
+        # We want X (right) and Z (forward) for 2D map
+        # Height: Y. Ground is > 0.20. Obstacles are < 0.15 roughly?
+        # Let's assume anything with Y < 0.15 (above ground) is an obstacle
+        
+        mask = (points['y'] < 0.15) & (points['z'] > 0.1) & (points['z'] < 4.0)
+        obstacle_points = points[mask]
+        
+        # Create Grid
+        grid = np.zeros((self.costmap_height, self.costmap_width), dtype=np.int8)
+        
+        # Map points to grid indices
+        # Grid X (rows) -> Robot Z (Forward)
+        # Grid Y (cols) -> Robot -X (Left)? 
+        # Let's align with Robot Base Frame: X Forward, Y Left.
+        # Camera: Z Forward, -X Left.
+        
+        # Robot X (Forward) = Camera Z
+        # Robot Y (Left) = Camera -X
+        
+        r_x = obstacle_points['z']
+        r_y = -obstacle_points['x']
+        
+        # Indices
+        # Row (X): 0 is bottom (behind), Height is top (forward)
+        # Robot is at index [origin_x, origin_y]
+        
+        idx_x = (r_x / self.costmap_resolution).astype(int)
+        idx_y = (r_y / self.costmap_resolution).astype(int) + self.costmap_origin_y
+        
+        # Clip
+        valid_mask = (idx_x >= 0) & (idx_x < self.costmap_height) & \
+                     (idx_y >= 0) & (idx_y < self.costmap_width)
+                     
+        grid[idx_x[valid_mask], idx_y[valid_mask]] = 100 # Occupied
+        
+        self.local_costmap = grid
+
+    def check_collision(self, lin_vel, ang_vel, time_horizon=1.0):
+        """
+        Simple collision check for a trajectory.
+        """
+        if self.local_costmap is None: return False
+        
+        # Simulate trajectory
+        steps = 10
+        dt = time_horizon / steps
+        x, y, theta = 0.0, 0.0, 0.0
+        
+        for _ in range(steps):
+            x += lin_vel * math.cos(theta) * dt
+            y += lin_vel * math.sin(theta) * dt
+            theta += ang_vel * dt
+            
+            # Check grid
+            idx_x = int(x / self.costmap_resolution)
+            idx_y = int(y / self.costmap_resolution) + self.costmap_origin_y
+            
+            if 0 <= idx_x < self.costmap_height and 0 <= idx_y < self.costmap_width:
+                if self.local_costmap[idx_x, idx_y] > 50:
+                    return True
+        return False
 
     def calculate_radius_entry_point(self, current_pos):
         vec_to_center = self.HUT_CENTER - current_pos
@@ -314,7 +403,7 @@ class DockingController(Node):
             self.log_debug(f"ALIGN: Y_err={y_error:.3f}, Yaw_err={yaw_error:.3f}")
 
             # FIX 1: Toleranz für Y deutlich erhöht (auf 15cm), da wir das während der Fahrt korrigieren
-            if abs(y_error) < 0.20 and abs(yaw_error) < 0.05:
+            if abs(y_error) < 0.30 and abs(yaw_error) < 0.1:
                 self.change_state(DockingState.DOCKING)
                 self.publish_twist(0.0, 0.0)
                 self.get_logger().info("Ausrichtung OK. Beginne DOCKING.")
@@ -324,6 +413,8 @@ class DockingController(Node):
                 # y_error korrigieren wir gleich im DOCKING-State durch Kurvenfahrt.
                 ang_vel = 1.0 * yaw_error 
                 ang_vel = np.clip(ang_vel, -0.4, 0.4)
+                
+                # Check Collision before turning? Turning in place is usually safe(r)
                 self.publish_twist(0.0, ang_vel)
             return
             
@@ -346,9 +437,24 @@ class DockingController(Node):
                 lin = np.clip(0.3 * dist_error, -0.15, 0.15)
                 
                 # Aggressive Korrektur des seitlichen Versatzes WÄHREND der Fahrt
-                # Wenn y > 0 (links), drehen wir nach links (pos), um darauf zuzufahren
-                ang = np.clip(3.0 * y_error, -0.5, 0.5) 
+                # Wenn y > 0 (links), drehen wir nach links (pos), um darauf zuzufahren?
+                # NEIN! Wenn y > 0 (links vom Ziel), müssen wir nach RECHTS drehen (negativ), um zur Mitte zu kommen?
+                # Moment: y_error ist Position der Hütte im Roboter Frame.
+                # Wenn Hütte bei Y = +0.5 (Links), dann müssen wir nach Links fahren.
+                # Ackermann/DiffDrive: Nach Links fahren = Nach Links drehen und vorwärts.
+                # Also: y > 0 -> ang > 0.
                 
+                ang = np.clip(2.0 * y_error, -0.5, 0.5) 
+                
+                # Collision Check
+                if self.check_collision(lin, ang):
+                    self.get_logger().warn("COLLISION AHEAD! Stopping.", throttle_duration_sec=1.0)
+                    self.publish_twist(0.0, 0.0)
+                    # Maybe try to rotate only?
+                    if not self.check_collision(0.0, ang):
+                         self.publish_twist(0.0, ang)
+                    return
+
                 self.publish_twist(lin, ang)
             return
 
