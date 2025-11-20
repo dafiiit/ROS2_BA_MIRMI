@@ -102,7 +102,9 @@ class PCLPosePublisher(Node):
         
         # 2. Preprocessing
         scene_points = self.preprocess_cloud(scene_points)
-        if len(scene_points) < 100: return
+        if len(scene_points) < 100: 
+            self.get_logger().warn(f"Not enough points after preprocessing: {len(scene_points)}")
+            return
 
         # 3. Initial Guess (Centroid Alignment)
         centroid_src = np.mean(scene_points, axis=0)
@@ -119,8 +121,10 @@ class PCLPosePublisher(Node):
         
         fitness = np.mean(distances)
         if fitness > 0.05: # Threshold
-            # self.get_logger().warn(f"ICP fitness poor: {fitness}")
+            self.get_logger().warn(f"ICP fitness poor: {fitness:.4f} (Iter: {iterations})")
             return
+        
+        self.get_logger().info(f"ICP Success. Fitness: {fitness:.4f}. Publishing Pose.")
 
         # 5. Transform to Robot Frame
         # We have T_hut_cam (Scene in Hut Frame)
@@ -171,7 +175,7 @@ class PCLPosePublisher(Node):
             self.publisher_.publish(pose_msg)
             
         except TransformException as ex:
-            self.get_logger().info(f'Could not transform: {ex}')
+            self.get_logger().error(f'Could not transform: {ex}')
 
 
     def best_fit_transform(self, A, B):

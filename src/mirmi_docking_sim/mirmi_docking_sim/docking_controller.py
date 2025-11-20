@@ -205,7 +205,7 @@ class DockingController(Node):
         # Wenn wir im Suchmodus sind und eine Pose empfangen, haben wir das Ziel gefunden
         if self.state == DockingState.SEARCHING:
             self.publish_twist(0.0, 0.0)
-            self.get_logger().info("Ziel erkannt (Pose empfangen)! Wechsle zu LOCALIZING.")
+            self.get_logger().info(f"Ziel erkannt (Pose empfangen)! Age: {(self.get_clock().now() - rclpy.time.Time.from_msg(msg.header.stamp)).nanoseconds / 1e9:.2f}s. Wechsle zu LOCALIZING.")
             self.change_state(DockingState.LOCALIZING)
             
         # Wenn wir im Localizing Modus sind
@@ -392,7 +392,10 @@ class DockingController(Node):
         if self.state == DockingState.FINAL_ALIGNMENT:
             if not self.is_pose_fresh(timeout=1.0):
                 self.publish_twist(0.0, 0.0)
-                self.get_logger().warn("Warte auf Pose...", throttle_duration_sec=2.0)
+                age = "None"
+                if self.latest_docking_pose:
+                     age = f"{(self.get_clock().now() - rclpy.time.Time.from_msg(self.latest_docking_pose.header.stamp)).nanoseconds / 1e9:.2f}s"
+                self.get_logger().warn(f"Warte auf Pose... (Last Pose Age: {age})", throttle_duration_sec=2.0)
                 return
             
             y_error = self.latest_docking_pose.pose.position.y
