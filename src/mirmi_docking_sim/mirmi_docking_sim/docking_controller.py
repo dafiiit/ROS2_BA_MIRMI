@@ -358,6 +358,9 @@ class DockingController(Node):
             # We use the "center between wheels" which is approximately the robot's position (cx, cy)
             dist_to_target = math.sqrt((cx - 10.5)**2 + (cy - 2.0)**2)
             
+            # Restore current_angle calculation needed for next_angle
+            current_angle = math.atan2(cy - self.HUT_CENTER[1], cx - self.HUT_CENTER[0])
+            
             if dist_to_target < 0.1: # 10cm tolerance
                 self.publish_twist(0.0, 0.0)
                 self.current_arc_goal = None
