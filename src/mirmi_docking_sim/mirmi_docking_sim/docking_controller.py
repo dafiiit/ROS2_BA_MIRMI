@@ -354,13 +354,11 @@ class DockingController(Node):
             return
             
         if self.state == DockingState.FOLLOW_ARC:
-            current_angle = math.atan2(cy - self.HUT_CENTER[1], cx - self.HUT_CENTER[0])
-            opening_angle = math.atan2(self.WAYPOINT_OPENING[1] - self.HUT_CENTER[1], 
-                                       self.WAYPOINT_OPENING[0] - self.HUT_CENTER[0])
-            angle_err = self.normalize_angle(opening_angle - current_angle)
+            # Check distance to target point (10.5, 2.0)
+            # We use the "center between wheels" which is approximately the robot's position (cx, cy)
+            dist_to_target = math.sqrt((cx - 10.5)**2 + (cy - 2.0)**2)
             
-            # Tightened tolerance to 0.02 rad (~1 deg) to ensure we are really at the center line
-            if abs(angle_err) < 0.02:
+            if dist_to_target < 0.1: # 10cm tolerance
                 self.publish_twist(0.0, 0.0)
                 self.current_arc_goal = None
                 self.change_state(DockingState.ALIGN_TO_HUT)

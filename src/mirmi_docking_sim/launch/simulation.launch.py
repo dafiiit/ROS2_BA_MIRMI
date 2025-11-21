@@ -3,10 +3,11 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, SetEnvironmentVariable, DeclareLaunchArgument 
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration, PythonExpression, PathJoinSubstitution
 from launch.conditions import IfCondition
 from launch_ros.actions import Node, ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
+from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
 
@@ -172,6 +173,17 @@ def generate_launch_description():
         parameters=[{'use_ground_truth': use_ground_truth}]
     )
 
+    # Foxglove Bridge
+    foxglove_bridge = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution([
+                FindPackageShare('foxglove_bridge'),
+                'launch',
+                'foxglove_bridge_launch.xml'
+            ])
+        )
+    )
+
     return LaunchDescription([
         use_gt_arg,
         loc_source_arg,
@@ -195,5 +207,8 @@ def generate_launch_description():
         pcl_adapter,
         
         # Controller
-        docking_controller_node
+        docking_controller_node,
+
+        # Foxglove Bridge
+        foxglove_bridge
     ])
